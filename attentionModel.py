@@ -13,21 +13,20 @@ import copy
 from networkTool import device
 
 class SelfMultiheadAttention(nn.Module):
-
     def __init__(self, emsize, nhead, dropout=0.5):
         super(SelfMultiheadAttention, self).__init__()
-        self.nhead = nhead  # 4
-        self.head_size = emsize // nhead  # 168//4=42  
+        self.nhead = nhead  # 头的数量
+        self.head_size = emsize // nhead  # 每个头的大小
         assert self.head_size * nhead == emsize, "embed_dim must be divisible by num_heads"
 
-        self.all_head_size = int(self.nhead * self.head_size)  # 
-        self.mlpKey = nn.Linear(emsize, self.all_head_size) #MLP(168,168)
-        self.mlpQuery = nn.Linear(emsize, self.all_head_size)
-        self.mlpValue = nn.Linear(emsize, self.all_head_size)
-        self.dropout = nn.Dropout(dropout)
-        
-    # Slice the output of mlpKQV to implement multi-head attention.
+        self.all_head_size = int(self.nhead * self.head_size)  # 所有头的总大小
+        self.mlpKey = nn.Linear(emsize, self.all_head_size) # 定义线性变换用于生成键
+        self.mlpQuery = nn.Linear(emsize, self.all_head_size)  # 定义线性变换用于生成查询
+        self.mlpValue = nn.Linear(emsize, self.all_head_size)  # 定义线性变换用于生成值
+        self.dropout = nn.Dropout(dropout)  # 定义dropout层
+
     def slice(self,x,dim):
+        # 切片函数，用于将mlpKey、mlpQuery和mlpValue的输出切片以实现多头注意力
         new_x_shape = x.size()[:-1] + (self.nhead, self.head_size) # [batch_size, bptt, nhead, head_size] or [batch_size, bptt, levelNumK, nhead, head_size]
         x = x.view(*new_x_shape)
         if (dim == 3):
@@ -37,8 +36,8 @@ class SelfMultiheadAttention(nn.Module):
             assert 0
         return x
 
-    #em.shape = [bptt,batch_size,emsize]  mask.shape=[bptt, bptt]
     def forward(self,em,mask):
+        # 前向传播函数，计算多头注意力
         em = em.transpose(0,1).contiguous()  #[batch_size,bptt,...]
         Key = self.slice(self.mlpKey(em),em.dim())    # [batch_size, bptt, all_head_size] -> [batch_size,nhead,bptt,head_size]
         Query = self.slice(self.mlpQuery(em),em.dim()) #torch.Size([32, 4, 256, 42])
@@ -62,18 +61,18 @@ class TransformerLayer(nn.Module):
 
     def __init__(self, ninp, nhead, nhid, dropout=0.1):
         super(TransformerLayer, self).__init__()
-        self.MultiAttention = SelfMultiheadAttention(emsize=ninp,nhead=nhead)
-        self.linear1 = nn.Linear(ninp,nhid)
-        self.dropout = nn.Dropout(dropout)
-        self.linear2 = nn.Linear(nhid,ninp)
+        self.MultiAttention = SelfMultiheadAttention(emsize=ninp,nhead=nhead)  # 多头注意力层
+        self.linear1 = nn.Linear(ninp,nhid)  # 线性变换层1
+        self.dropout = nn.Dropout(dropout)  # dropout层
+        self.linear2 = nn.Linear(nhid,ninp)  # 线性变换层2
 
-        self.norm1 = nn.LayerNorm(ninp, eps=1e-5) # It will affect parallel coding 
-        self.norm2 = nn.LayerNorm(ninp, eps=1e-5)
-        self.dropout1 = nn.Dropout(dropout)
-        self.dropout2 = nn.Dropout(dropout)
+        self.norm1 = nn.LayerNorm(ninp, eps=1e-5)  # 归一化层1
+        self.norm2 = nn.LayerNorm(ninp, eps=1e-5)  # 归一化层2
+        self.dropout1 = nn.Dropout(dropout)  # dropout层1
+        self.dropout2 = nn.Dropout(dropout)  # dropout层2
 
-    # src is the integration of leaf node and its ancestors.
     def forward(self, src, src_mask):
+        # 前向传播函数，计算Transformer层的输出
         src2 = self.MultiAttention(src,src_mask)  #Multi-head Attention
         src = self.dropout1(src2) + src
         src = self.norm1(src)
@@ -86,11 +85,11 @@ class TransformerModule(nn.Module):
 
     def __init__(self,layer, nlayers):
         super(TransformerModule, self).__init__()
-        self.layers = torch.nn.ModuleList([copy.deepcopy(layer) for i in range(nlayers)])
+        self.layers = torch.nn.ModuleList([copy.deepcopy(layer) for i in range(nlayers)])  # Transformer层的列表
 
     def forward(self,src,src_mask):
+        # 前向传播函数，计算Transformer模块的输出
         output = src
-
         for mod in self.layers:
             output = mod(output, src_mask=src_mask)
         return output
